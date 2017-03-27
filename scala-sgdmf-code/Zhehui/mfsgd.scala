@@ -12,19 +12,18 @@ import org.apache.spark.storage.StorageLevel
 object mfsgd{
   val negativeFactors = false
   def get_block_dim(num_ids:Int, num_blocks:Int, block_id:Int):Int = {
-    // get block dimension
     var cut_off_block = num_ids % num_blocks
     var block_dim = 0
     if (block_id < cut_off_block){
-        block_dim = num_ids / num_blocks + 1
+      block_dim = num_ids / num_blocks + 1
     }else{
-        block_dim = num_ids / num_blocks
+      block_dim = num_ids / num_blocks
     }
     block_dim
   }
 
   def randomMatrix(m: Int, n: Int) = {
-    // change this after... block number or anything for seed value 
+    // change this after... block number or anything for seed value
     val rand = new Random(42)
     if (negativeFactors) {
       new BDM(m, n, Array.fill(m * n)(rand.nextDouble() * 2 - 1))
@@ -38,7 +37,6 @@ object mfsgd{
   }
 
   def get_block_id(num_ids:Int, num_blocks:Int, my_id:Int):Int = {
-    // partition to blocks, e.g. 10 will become 4, 3, 3
     var cut_off_block = num_ids % num_blocks
     var cut_off_block_offset = (num_ids / num_blocks + 1) * cut_off_block
     var block_id = 0
@@ -50,14 +48,13 @@ object mfsgd{
   }
 
   def makepart(in:Int, ite:Iterator[(Int, (Int, Int, Float))], num_y_ids:Int,  TN:Int):Iterator[(Int, Array[Array[(Int, Int, Float)]])] = {
-    // ite: block_id, (x, y, score)
     var ar_buff = ArrayBuffer[ArrayBuffer[(Int, Int, Float)]]()
     for(a <- 0 until TN ){
       ar_buff += ArrayBuffer[(Int, Int, Float)]()
     }
     for (elem <- ite){
-      val ybid = get_block_id(num_y_ids, TN, elem._2._2) // elem._2._2: y
-      ar_buff(ybid) += Tuple3(elem._2._1, elem._2._2, elem._2._3) // (x, y, score)
+      val ybid = get_block_id(num_y_ids, TN, elem._2._2)
+      ar_buff(ybid) += Tuple3(elem._2._1, elem._2._2, elem._2._3)
       assert(in == elem._1, "Index does not match")
     }
     val arbuff_array = ar_buff.map(a => a.toArray).toArray
@@ -88,7 +85,7 @@ object mfsgd{
 
   def compute_a_block(ite:Iterator[((Int, ((Array[Array[(Int, Int, Float)]], breeze.linalg.DenseMatrix[Double]), breeze.linalg.DenseMatrix[Double])))], subepoch:Int, num_x_ids:Int, num_y_ids:Int, N:Int, stepsize:Double) = {
     var arbuffer = ArrayBuffer[Tuple2[Int, ((Array[Array[(Int, Int, Float)]], breeze.linalg.DenseMatrix[Double]), breeze.linalg.DenseMatrix[Double])]]()
-    var count = 0 
+    var count = 0
     var itercnt = 0
     var count_per_iter=0
     for (elem <- ite){
@@ -113,7 +110,7 @@ object mfsgd{
         val w_id = x_id - x_id_offset
         val h_id = y_id - y_id_offset
         val dp:Double = w(::,w_id) dot h(::,h_id)
-        val diff:Double = score - dp       
+        val diff:Double = score - dp
         val w_gradient:BDV[Double] = h(::,h_id)*diff*(-2.0)
         val neww = w(::,w_id) - w_gradient*stepsize
         w(::, w_id) := neww
@@ -152,7 +149,7 @@ object mfsgd{
   def update_h_ids(ite:Iterator[((Int, (Array[Array[(Int, Int, Float)]], breeze.linalg.DenseMatrix[Double], breeze.linalg.DenseMatrix[Double])))], N:Int) = {
     var arbuffer = ArrayBuffer[(Int, breeze.linalg.DenseMatrix[Double])]()
     for (elem <- ite){
-      var newidx = (elem._1 + N - 1) % N 
+      var newidx = (elem._1 + N - 1) % N
       val tmp = Tuple2(newidx, elem._2._3)
       arbuffer += tmp
     }
@@ -229,7 +226,7 @@ object mfsgd{
     val data_raw = sc.textFile(data_path, executor_num).map(line => (line.split(",")(0).toInt,line.split(",")(1).toInt,line.split(",")(2).toFloat))
     val num_x_ids = data_raw.map(a => a._1).reduce((a,b) => if(a > b) a else b)+1
     val num_y_ids = data_raw.map(a => a._2).reduce((a,b) => if(a > b) a else b)+1
-    println("[debug] x_ids : %d y_idx: %d ".format(num_x_ids, num_y_ids))  
+    println("[debug] x_ids : %d y_idx: %d ".format(num_x_ids, num_y_ids))
     println("[debug] x_block dim : %d y_block dim: %d ".format(get_block_dim(num_x_ids, executor_num, 0), get_block_dim(num_y_ids, executor_num, 0)))
 
     val data_block = data_raw.map(a => (get_block_id(num_x_ids, executor_num, a._1), a)).partitionBy(new HashPartitioner(executor_num)).
@@ -244,8 +241,7 @@ object mfsgd{
     // generate w/h factor matrices with random values
     val blockids = sc.parallelize(0 until executor_num, executor_num).persist()
     val w_block = blockids.map(a => generate_init(a, rank, get_block_dim(num_x_ids, executor_num, a)));
-    var h_block = blockids.map(a => generate_init(a, rank, get_block_dim(num_y_ids, executor_num,
-      a)));
+    var h_block = blockids.map(a => generate_init(a, rank, get_block_dim(num_y_ids, executor_num, a)));
     //    println("[Debug] Wblock count(%d) Hblock count(%d) \n".format(w_block.count(), h_block.count()))
 
     //merge R and W
@@ -257,30 +253,27 @@ object mfsgd{
     println("@@@@@ data loading latency: %f \n\n\n".format((loading_end_t - program_start_t)/1000.0))
     System.out.println("[USER INFO]: data loading latency including rate counting\n".format((loading_end_t - program_start_t)/1000.0))
 
-    val eval_h_array=ArrayBuffer[org.apache.spark.rdd.RDD[(Int, breeze.linalg.DenseMatrix[Double])]]()
+    var eval_h_block = h_block
 
     for(iteration <- 0 until maxiter){
       for(subepoch <- 0 until executor_num){
-        val idx= iteration*executor_num + subepoch
-        val cjoined4 = data_block_with_w.join(h_block, executor_num).
-          mapPartitions(a => compute_a_block(a, subepoch, num_x_ids, num_y_ids, executor_num, stepsize), true)
-        data_block_with_w = cjoined4.mapPartitions(x=> wrapper(x), true)
-        h_block = cjoined4.map(x => update_h_ids_onlymap(x, executor_num))
+        val idx = iteration*executor_num + subepoch
+        val cjoined4es = data_block_with_w.join(h_block, executor_num).
+            mapPartitions(a => compute_a_block(a, subepoch, num_x_ids, num_y_ids, executor_num, stepsize), true).persist(StorageLevel.MEMORY_ONLY)
+        data_block_with_w = cjoined4es.mapPartitions(x=> wrapper(x), true).persist(StorageLevel.MEMORY_ONLY)
+        h_block = cjoined4es.map(x => update_h_ids_onlymap(x, executor_num)).persist(StorageLevel.MEMORY_ONLY)
       }
 
       val error = sc.accumulator(0.0, "error")
       val counta = sc.accumulator(0, "ratecount")
 
-//      for(subepoch <- 0 until executor_num){
-//        val idx = iteration*executor_num + subepoch
-//        val eval_h_block = h_block.map(x =>
-//          update_eval_h_ids_onlymap(x, subepoch, executor_num)).persist(StorageLevel.MEMORY_ONLY)
-//        data_block_with_w.join(eval_h_block, executor_num).foreach(x => eval_a_block(x, subepoch, num_x_ids, num_y_ids, executor_num, error, counta))
-//      }
+      data_block_with_w.localCheckpoint()
+      h_block.localCheckpoint()
 
       val eval_h_block = h_block.flatMap(x =>
         map_h_to_all_ids(x, executor_num)).persist(StorageLevel.MEMORY_ONLY)
       data_block_with_w.join(eval_h_block, executor_num).foreach(x => eval_a_block(x, num_x_ids, num_y_ids, executor_num, error, counta))
+
       val iter_end_t = System.currentTimeMillis
       println("@@@@@@@ iteration %d error %f count : %d elap_from_first_iter(%f) elap_from_start(%f) \n\n\n\n".
         format(iteration, error.value, counta.value, (iter_end_t-first_iter_start_t)/1000.0,(iter_end_t-program_start_t)/1000.0))
@@ -288,7 +281,7 @@ object mfsgd{
         format(iteration, error.value, counta.value, (iter_end_t-first_iter_start_t)/1000.0,(iter_end_t-program_start_t)/1000.0))
 
       stepsize = stepsize * decay;
-    }    
+    }
     println("END OF COMPUTE")
-  }// end of main 
+  }// end of main
 } // end of Object
